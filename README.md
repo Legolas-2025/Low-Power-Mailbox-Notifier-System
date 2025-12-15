@@ -1,4 +1,5 @@
 # 📮 Low-Power Mailbox Notifier System
+![ESP32 Electricity Price Ticker](header.png)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![ESP8266](https://img.shields.io/badge/Platform-ESP8266-orange.svg)](https://www.espressif.com/en/products/socs/esp8266)
