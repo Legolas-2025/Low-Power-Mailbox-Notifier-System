@@ -1,0 +1,314 @@
+# ESPHome YAML Configuration for Low-Power Mailbox Notifier Receiver Gateway
+# Maintains LCD display functionality and adds native ESPHome sensors for Home Assistant
+#
+# Hardware: WeMos D1 Mini ESP8266 ESP-12F
+# Display: 16x2 I2C LCD (0x27)
+# RF Module: HC-12 433MHz Serial Wireless Module
+# Optional: RCWL-0516 Microwave Radar Sensor for presence detection
+
+esphome:
+  name: mailbox_receiver_gateway
+  friendly_name: Mailbox Receiver Gateway
+  platform: ESP8266
+  board: d1_mini
+  project:
+    name: Low-Power-Mailbox-Notifier
+    version: "1.0"
+  # Enable logging for debugging
+  logger:
+    level: INFO
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: "YOUR_HOME_ASSISTANT_API_KEY"  # Replace with your HA API key
+
+# Enable OTA updates
+ota:
+  password: "YOUR_OTA_PASSWORD"  # Replace with your OTA password
+
+# Enable WiFi
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  
+  # Optional fallback AP for configuration
+  ap:
+    ssid: "Mailbox-Gateway"
+    password: "mailbox123"
+
+# Enable Web Server for status monitoring
+web_server:
+  port: 80
+  auth:
+    username: admin
+    password: "web_password"  # Change this
+
+# Custom components and sensors will be defined below
+substitutions:
+  # Hardware Pin Assignments (must match Arduino code)
+  hc12_tx_pin: GPIO12  # D6 - HC-12 RX Pin
+  hc12_rx_pin: GPIO14  # D5 - HC-12 TX Pin
+  lcd_sda_pin: GPIO4   # D2 - I2C Data
+  lcd_scl_pin: GPIO5   # D1 - I2C Clock
+  indicator_led_pin: GPIO13  # D7 - Breathing LED
+  reset_button_pin: GPIO15   # D8 - Touch Button
+  presence_sensor_pin: GPIO0 # D3 - RCWL-0516 (Optional)
+  
+  # Display Configuration
+  lcd_address: "0x27"
+  lcd_columns: "16"
+  lcd_rows: "2"
+  
+  # Time Configuration
+  timezone: "CET-1CEST,M3.5.0,M10.5.0/3"  # Central European Time with DST
+
+# Include common components
+globals:
+  - id: mailbox_status
+    type: std::string
+    initial_value: "\"No mail yet\""
+  
+  - id: last_reception_time
+    type: std::string
+    initial_value: "\"--:--\""
+  
+  - id: battery_percent
+    type: int
+    initial_value: "0"
+  
+  - id: notification_active
+    type: bool
+    initial_value: "false"
+  
+  - id: current_status
+    type: int  # 0=STANDBY, 1=NOTIFICATION
+    initial_value: "0"
+
+# Time Component for NTP synchronization
+time:
+  - platform: sntp
+    id: sntp_time
+    timezone: "${timezone}"
+    servers:
+      - 0.pool.ntp.org
+      - 1.pool.ntp.org
+      - 2.pool.ntp.org
+
+# Text Sensors for Home Assistant integration
+text_sensor:
+  - platform: template
+    name: "Mailbox Status"
+    id: mailbox_status_sensor
+    icon: "mdi:mailbox"
+    update_interval: 1s
+    
+  - platform: template
+    name: "Last Reception Time"
+    id: reception_time_sensor
+    icon: "mdi:clock"
+    update_interval: 1s
+
+# Binary Sensor for presence detection (Optional)
+binary_sensor:
+  - platform: gpio
+    pin: ${presence_sensor_pin}
+    id: presence_detected
+    name: "Presence Detected"
+    icon: "mdi:radar"
+    device_class: motion
+    on_press:
+      then:
+        - switch.turn_on: lcd_backlight
+        - switch.turn_on: indicator_led
+        - delay: 30s
+        - if:
+            condition:
+              binary_sensor.is_off: presence_detected
+            then:
+              - switch.turn_off: lcd_backlight
+              - switch.turn_off: indicator_led
+
+# Sensors for battery and signal strength
+sensor:
+  - platform: template
+    name: "Battery Level"
+    id: battery_sensor
+    icon: "mdi:battery"
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    
+  - platform: wifi_signal
+    name: "WiFi Signal Strength"
+    id: wifi_signal_sensor
+    icon: "mdi:wifi"
+    unit_of_measurement: "dBm"
+    accuracy_decimals: 0
+
+# Switches for LED and LCD control
+switch:
+  - platform: template
+    name: "LCD Backlight"
+    id: lcd_backlight
+    icon: "mdi:backlight"
+    optimistic: true
+    on_turn_on:
+      - lambda: 'id(lcd_display).set_backlight(true);'
+    on_turn_off:
+      - lambda: 'id(lcd_display).set_backlight(false);'
+  
+  - platform: template
+    name: "Indicator LED"
+    id: indicator_led
+    icon: "mdi:led-variant-on"
+    optimistic: true
+    on_turn_on:
+      - lambda: 'id(breathing_led).set_state(true);'
+    on_turn_off:
+      - lambda: 'id(breathing_led).set_state(false);'
+
+# Button for manual notification reset
+button:
+  - platform: template
+    name: "Reset Notification"
+    id: reset_notification_button
+    icon: "mdi:refresh"
+    on_press:
+      - lambda: 'id(current_status) = 0; id(notification_active) = false;'
+
+# Custom components for HC-12 communication
+uart:
+  - id: hc12_uart
+    tx_pin: ${hc12_tx_pin}
+    rx_pin: ${hc12_rx_pin}
+    baud_rate: 9600
+
+# Custom component for LCD control
+# Using the LCD Display component with custom text updates
+display:
+  - platform: lcd_pcf8574
+    id: lcd_display
+    address: ${lcd_address}
+    columns: ${lcd_columns}
+    rows: ${lcd_rows}
+    lambda: |-
+      if (id(notification_active)) {
+        it.printf(0, 0, "%s", id(mailbox_status).c_str());
+        it.printf(0, 1, "%s", id(last_reception_time).c_str());
+      } else {
+        it.printf(0, 0, "%s", "No mail yet");
+        it.printf(0, 1, "%s", id(sntp_time).now().strftime("%d.%m.%y, %H:%M").c_str());
+      }
+
+# Custom component for breathing LED effect
+light:
+  - platform: monochromatic
+    id: breathing_led
+    output: led_output
+    name: "Breathing LED"
+    icon: "mdi:led-variant-on"
+
+# LED Output for breathing effect
+output:
+  - platform: esp8266_pwm
+    id: led_output
+    pin: ${indicator_led_pin}
+    frequency: 1000 Hz
+
+# Custom component for HC-12 communication and mail handling
+script:
+  # Breathing LED effect script
+  - id: breathing_effect
+    mode: parallel
+    then:
+      - repeat:
+          count: 100
+          then:
+            - output.turn_on:
+                id: led_output
+            - delay: 0.01s
+            - output.turn_off:
+                id: led_output
+            - delay: 0.01s
+
+# Automation for HC-12 message processing
+# This will be implemented using ESPHome's UART text sensor
+text_sensor:
+  - platform: uart
+    id: hc12_messages
+    uart_id: hc12_uart
+    on_data:
+      then:
+        - lambda: '|
+            // Parse HC-12 message data
+            // Expected format: "Mail available" or "Mail picked up" or "Test successful" or "Charge battery"
+            std::string msg = x.substr(0, min(x.length(), size_t(20)));
+            
+            // Update status
+            id(mailbox_status) = msg;
+            id(last_reception_time) = id(sntp_time).now().strftime("%d.%m.%y, %H:%M");
+            id(current_status) = 1;
+            id(notification_active) = true;
+            
+            // Update sensors
+            id(mailbox_status_sensor).publish_state(msg);
+            id(reception_time_sensor).publish_state(id(last_reception_time));
+            
+            // Start breathing effect
+            id(breathing_effect).execute();
+            
+            // Send ACK back to transmitter
+            // Note: This would require custom implementation as ESPHome doesn't directly support UART write
+            // In practice, you'd need a custom ESPHome component or use the UART component's write functionality
+
+# Automation for automatic status display updates
+interval:
+  - interval: 1s
+    then:
+      - if:
+          condition:
+            lambda: 'return id(notification_active);'
+          then:
+            - display.page.show:
+                id: lcd_display
+            - display.full_update:
+                id: lcd_display
+          else:
+            - display.page.show:
+                id: lcd_display
+            - display.full_update:
+                id: lcd_display
+
+# Additional Home Assistant integrations
+# MQTT Integration (Optional - requires additional setup)
+# mqtt:
+#   broker: !secret mqtt_broker
+#   port: 1883
+#   username: !secret mqtt_username
+#   password: !secret mqtt_password
+#   on_message:
+#     topic: home/mailbox/reset
+#     payload: "reset"
+#     then:
+#       - button.press:
+#           id: reset_notification_button
+
+# Binary Sensor for reset button
+binary_sensor:
+  - platform: gpio
+    pin: ${reset_button_pin}
+    id: reset_button
+    name: "Reset Button"
+    icon: mdi:button-pointer
+    on_press:
+      then:
+        - button.press:
+            id: reset_notification_button
+        - switch.turn_off: indicator_led
+        - lambda: 'id(current_status) = 0; id(notification_active) = false;'
+
+# Status LED (always on when system is running)
+status_led:
+  pin:
+    number: LED_BUILTIN
+    inverted: true
