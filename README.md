@@ -7,7 +7,7 @@
 [![Home Assistant](https://img.shields.io/badge/Integration-Home%20Assistant-blue.svg)](https://www.home-assistant.io/)
 [![Low Power](https://img.shields.io/badge/Power-Ultra%20Low%20Power-red.svg)](https://www.ti.com/product/TPS63070)
 
-A robust, long-range mailbox notification system using ESP8266 microcontrollers and HC-12 433MHz radio modules. Designed for maximum battery life with intelligent power management and seamless Home Assistant integration.
+A robust, long-range mailbox notification system using ESP8266 microcontrollers and HC-12 433MHz long-range radio modules. Designed for maximum battery life with intelligent power management and seamless Home Assistant integration.
 
 ---
 
